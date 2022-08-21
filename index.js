@@ -1,7 +1,9 @@
 require('dotenv').config()
+const sequelize = require('./db')
 const TelegramApi = require('node-telegram-bot-api')
 const { gameOptions, againOptions } = require('./options')
-
+const UserModel = require('./models')
+const { User } = require('../shop project/server/models/models')
 const token = process.env.TOKEN
 
 const bot = new TelegramApi(token, { polling: true })
@@ -17,7 +19,14 @@ const startGame = async (chatId) => {
     await bot.sendMessage(chatId, 'guess !', gameOptions)
 }
 
-const start = () => {
+const start = async () => {
+
+    try {
+        await sequelize.authenticate()
+        await sequelize.sync()
+    } catch (e) {
+        console.log(e)
+    }
     bot.setMyCommands([
         { command: '/start', description: 'Start' },
         { command: '/info', description: 'Get info about user' },
@@ -28,16 +37,23 @@ const start = () => {
         const text = msg.text;
         const chatId = msg.chat.id;
 
-        if (text === '/start') {
-            return bot.sendMessage(chatId, `welcome`)
+        try {
+            if (text === '/start') {
+                await UserModel.create({ chatId })
+                return bot.sendMessage(chatId, `Welcome`)
+            }
+            if (text === '/info') {
+                const user = await UserModel.findOne({ chatId })
+                return bot.sendMessage(chatId, `Your name is ${msg.from.first_name} ${msg.from.last_name === undefined ? '' : msg.from.last_name}.You have ${user.right} right answers and ${user.wrong} wrong answers.`)
+            }
+            if (text === '/game') {
+                startGame(chatId)
+            }
+            return bot.sendMessage(chatId, 'I don\'t understand you')
+        } catch (e) {
+            return bot.sendMessage(chatId, 'An error happened :(')
         }
-        if (text === '/info') {
-            return bot.sendMessage(chatId, `your name is ${msg.from.first_name} ${msg.from.last_name === undefined ? '' : msg.from.last_name} `)
-        }
-        if (text === '/game') {
-            startGame(chatId)
-        }
-        return bot.sendMessage(chatId, 'I don\'t understand you')
+
     })
 
     bot.on('callback_query', async msg => {
@@ -46,11 +62,15 @@ const start = () => {
         if (data === '/again') {
             return startGame(chatId)
         }
+        const user = await UserModel.findOne({ chatId })
         if (parseInt(data) === chats[chatId]) {
-            return bot.sendMessage(chatId, 'Congratulation. You won!', againOptions)
+            user.right += 1;
+            await bot.sendMessage(chatId, 'Congratulation. You won!', againOptions)
         } else {
-            return bot.sendMessage(chatId, `You lost :(. The correct answer was number ${chats[chatId]}`, againOptions)
+            user.wrong += 1;
+            await bot.sendMessage(chatId, `You lost :(. The correct answer was number ${chats[chatId]}`, againOptions)
         }
+        await user.save()
     })
 }
 
